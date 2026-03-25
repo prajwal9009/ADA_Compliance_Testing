@@ -27,8 +27,8 @@ class PDFAccessibilityChecker:
 
         # Initial setup, create credentials instance
         credentials = ServicePrincipalCredentials(
-            client_id="<ID Here>.",
-            client_secret="<Secret Here>"
+            client_id="",
+            client_secret=""
         )
 
         # Reuse one PDF Services client for all files

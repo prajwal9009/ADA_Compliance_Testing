@@ -13,6 +13,51 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 INPUT_FOLDER = "Final_reports"
 OUTPUT_FOLDER = "Analysis_Output"
 OUTPUT_FILE = "WCAG22_AA_Final_Report_Analysis.xlsx"
+FINAL_SUMMARY_OUTPUT_FILE = "Final_excel_generated.xlsx"
+# Used to provide a "reference to issues file" when you run `Json_Final_Reports_To_Excel.py`.
+ISSUES_EXCEL_FOLDER = "Final_report_excels"
+
+EFFORT_SUBCATEGORY_TO_BAND = {
+    "simple": "Small",
+    "medium": "Medium",
+    "complex": "Large",
+}
+
+
+def map_effort_to_fix(effort_subcategory):
+    if effort_subcategory is None:
+        return ""
+    key = str(effort_subcategory).strip().lower()
+    return EFFORT_SUBCATEGORY_TO_BAND.get(key, str(effort_subcategory))
+
+
+def derive_document_stem(document_name, file_name):
+    """
+    Derive a stable stem like `CCP1000` from either:
+    - report["document_name"] (usually `CCP1000.json`)
+    - the final report filename (`CCP1000_Final_report.json`)
+    """
+    if isinstance(document_name, str) and document_name.strip():
+        base = os.path.splitext(document_name.strip())[0]
+        if base:
+            return base
+
+    # Expected: <stem>_Final_report.json
+    lowered = (file_name or "").lower()
+    if lowered.endswith("_final_report.json"):
+        return file_name[: -len("_Final_report.json")]
+    return os.path.splitext(file_name)[0]
+
+
+def resolve_issues_reference(stem):
+    """
+    Return a relative path to the best available per-document "issues file".
+    Prefer per-PDF Excel output when present; otherwise fall back to the per-PDF JSON.
+    """
+    candidate_excel = os.path.join(ISSUES_EXCEL_FOLDER, f"{stem}.xlsx")
+    if os.path.isfile(candidate_excel):
+        return candidate_excel
+    return os.path.join(INPUT_FOLDER, f"{stem}_Final_report.json")
 
 
 def safe_number(value, default=0):
@@ -226,7 +271,10 @@ def build_analysis():
     metadata_counter = Counter()
 
     for file_name, report in reports:
+        document_name = report.get("document_name") or ""
+        stem = derive_document_stem(document_name, file_name)
         pdf_name = report.get("document_name") or file_name.replace("_Final_report.json", ".pdf")
+        pdf_filename = f"{stem}.pdf"
         overall_status = report.get("overall_status", "Unknown")
         score = safe_number(report.get("score", 0))
 
@@ -289,6 +337,7 @@ def build_analysis():
 
         document_rows.append({
             "pdf_name": pdf_name,
+            "pdf_filename": pdf_filename,
             "overall_status": overall_status,
             "score": score,
             "passed": passed,
@@ -302,6 +351,9 @@ def build_analysis():
             "effort_score": effort_score,
             "effort_band": effort_band,
             "top_failed_rules": top_failed_rules,
+            "distributed_category": report.get("distributed_category", ""),
+            "effort_to_fix": map_effort_to_fix(report.get("distributed_subcategory", "")),
+            "issues_reference": resolve_issues_reference(stem),
         })
 
     document_rows.sort(key=lambda row: (row["effort_band"], row["score"]))
@@ -373,6 +425,24 @@ def build_analysis():
     os.makedirs(OUTPUT_FOLDER, exist_ok=True)
     output_path = os.path.join(OUTPUT_FOLDER, OUTPUT_FILE)
     workbook.save(output_path)
+
+    # Create the requested "final excel" mapping one row per PDF.
+    final_workbook = Workbook()
+    final_workbook.remove(final_workbook.active)
+    ws_final = final_workbook.create_sheet("Final_Summary")
+    ws_final.append(["filename", "categorization", "reference to issues file", "effort to fix"])
+    for row in document_rows:
+        ws_final.append([
+            row.get("pdf_filename", ""),
+            row.get("distributed_category", ""),
+            row.get("issues_reference", ""),
+            row.get("effort_to_fix", ""),
+        ])
+    format_sheet(ws_final, table_name="FinalSummaryTable")
+    final_path = os.path.join(OUTPUT_FOLDER, FINAL_SUMMARY_OUTPUT_FILE)
+    final_workbook.save(final_path)
+    print(f"Final summary excel generated successfully: {final_path}")
+
     return output_path
 
 
