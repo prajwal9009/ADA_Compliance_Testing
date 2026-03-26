@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 from collections import Counter
 from datetime import datetime
@@ -237,6 +238,185 @@ WCAG_MAPPING = {
             "level": "A",
             "impact": "Medium",
             "category": "Lists"
+        }
+    ],
+        "Keyboard accessible": [
+        {
+            "wcag": "2.1.1",
+            "name": "Keyboard",
+            "level": "A",
+            "impact": "High",
+            "category": "Interaction"
+        }
+    ],
+
+    "No keyboard trap": [
+        {
+            "wcag": "2.1.2",
+            "name": "No Keyboard Trap",
+            "level": "A",
+            "impact": "High",
+            "category": "Interaction"
+        }
+    ],
+
+    "Focus visible": [
+        {
+            "wcag": "2.4.7",
+            "name": "Focus Visible",
+            "level": "AA",
+            "impact": "High",
+            "category": "Navigation"
+        }
+    ],
+
+    "Bypass blocks": [
+        {
+            "wcag": "2.4.1",
+            "name": "Bypass Blocks",
+            "level": "A",
+            "impact": "Medium",
+            "category": "Navigation"
+        }
+    ],
+
+    "Link purpose": [
+        {
+            "wcag": "2.4.4",
+            "name": "Link Purpose",
+            "level": "A",
+            "impact": "Medium",
+            "category": "Navigation"
+        }
+    ],
+
+    "Headings and labels": [
+        {
+            "wcag": "2.4.6",
+            "name": "Headings and Labels",
+            "level": "AA",
+            "impact": "Medium",
+            "category": "Structure"
+        }
+    ],
+
+    "Error identification": [
+        {
+            "wcag": "3.3.1",
+            "name": "Error Identification",
+            "level": "A",
+            "impact": "High",
+            "category": "Forms"
+        }
+    ],
+
+    "Error suggestion": [
+        {
+            "wcag": "3.3.3",
+            "name": "Error Suggestion",
+            "level": "AA",
+            "impact": "High",
+            "category": "Forms"
+        }
+    ],
+
+    "Error prevention": [
+        {
+            "wcag": "3.3.4",
+            "name": "Error Prevention",
+            "level": "AA",
+            "impact": "High",
+            "category": "Forms"
+        }
+    ],
+
+    "Consistent navigation": [
+        {
+            "wcag": "3.2.3",
+            "name": "Consistent Navigation",
+            "level": "AA",
+            "impact": "Medium",
+            "category": "Navigation"
+        }
+    ],
+
+    "Consistent identification": [
+        {
+            "wcag": "3.2.4",
+            "name": "Consistent Identification",
+            "level": "AA",
+            "impact": "Medium",
+            "category": "Navigation"
+        }
+    ],
+
+    "Status messages": [
+        {
+            "wcag": "4.1.3",
+            "name": "Status Messages",
+            "level": "AA",
+            "impact": "High",
+            "category": "Assistive Tech"
+        }
+    ],
+
+    "Resize text": [
+        {
+            "wcag": "1.4.4",
+            "name": "Resize Text",
+            "level": "AA",
+            "impact": "Medium",
+            "category": "Visual"
+        }
+    ],
+
+    "Reflow": [
+        {
+            "wcag": "1.4.10",
+            "name": "Reflow",
+            "level": "AA",
+            "impact": "Medium",
+            "category": "Visual"
+        }
+    ],
+
+    "Non-text contrast": [
+        {
+            "wcag": "1.4.11",
+            "name": "Non-text Contrast",
+            "level": "AA",
+            "impact": "High",
+            "category": "Visual"
+        }
+    ],
+
+    "Text spacing": [
+        {
+            "wcag": "1.4.12",
+            "name": "Text Spacing",
+            "level": "AA",
+            "impact": "Medium",
+            "category": "Visual"
+        }
+    ],
+
+    "Language of parts": [
+        {
+            "wcag": "3.1.2",
+            "name": "Language of Parts",
+            "level": "AA",
+            "impact": "Low",
+            "category": "Language"
+        }
+    ],
+
+    "Target size": [
+        {
+            "wcag": "2.5.8",
+            "name": "Target Size (Minimum)",
+            "level": "AA",
+            "impact": "Medium",
+            "category": "Interaction"
         }
     ]
 }
@@ -509,6 +689,188 @@ RECOMMENDATIONS = {
         ],
         "priority": "Low",
         "automation_possible": False
+    },
+
+    "Keyboard accessible": {
+        "issue": "Form cannot be fully operated using keyboard",
+        "fix": [
+            "Ensure all fields are reachable using Tab key",
+            "Verify interaction without mouse",
+            "Test using keyboard-only navigation"
+        ],
+        "priority": "High",
+        "automation_possible": False
+    },
+
+    "No keyboard trap": {
+        "issue": "User gets stuck in a field/component",
+        "fix": [
+            "Ensure users can navigate away using Tab/Shift+Tab",
+            "Avoid trapping focus in interactive elements"
+        ],
+        "priority": "High",
+        "automation_possible": False
+    },
+
+    "Focus visible": {
+        "issue": "Focused element is not visually identifiable",
+        "fix": [
+            "Ensure visible outline or highlight on active field",
+            "Avoid removing default focus indicators"
+        ],
+        "priority": "High",
+        "automation_possible": False
+    },
+
+    "Bypass blocks": {
+        "issue": "No mechanism to skip repetitive content",
+        "fix": [
+            "Provide skip links or logical structure",
+            "Ensure screen reader users can navigate quickly"
+        ],
+        "priority": "Medium",
+        "automation_possible": False
+    },
+
+    "Link purpose": {
+        "issue": "Links are not descriptive",
+        "fix": [
+            "Avoid generic text like 'Click here'",
+            "Use meaningful link text"
+        ],
+        "priority": "Medium",
+        "automation_possible": False
+    },
+
+    "Headings and labels": {
+        "issue": "Unclear or missing headings/labels",
+        "fix": [
+            "Ensure headings describe sections clearly",
+            "Use consistent labeling for form fields"
+        ],
+        "priority": "Medium",
+        "automation_possible": False
+    },
+
+    "Error identification": {
+        "issue": "Errors are not clearly communicated",
+        "fix": [
+            "Display error message near field",
+            "Do not rely only on color",
+            "Ensure screen reader can announce error"
+        ],
+        "priority": "High",
+        "automation_possible": False
+    },
+
+    "Error suggestion": {
+        "issue": "No guidance on how to fix errors",
+        "fix": [
+            "Provide specific correction instructions",
+            "Include examples (e.g., DD/MM/YYYY)"
+        ],
+        "priority": "High",
+        "automation_possible": False
+    },
+
+    "Error prevention": {
+        "issue": "Critical actions lack confirmation or validation",
+        "fix": [
+            "Add confirmation dialogs",
+            "Allow users to review before submission"
+        ],
+        "priority": "High",
+        "automation_possible": False
+    },
+
+    "Consistent navigation": {
+        "issue": "Navigation is inconsistent across pages",
+        "fix": [
+            "Ensure consistent layout and navigation structure",
+            "Maintain uniform placement of key elements"
+        ],
+        "priority": "Medium",
+        "automation_possible": False
+    },
+
+    "Consistent identification": {
+        "issue": "Same elements are labeled differently",
+        "fix": [
+            "Use consistent naming for similar components",
+            "Avoid ambiguity in labels"
+        ],
+        "priority": "Medium",
+        "automation_possible": False
+    },
+
+    "Status messages": {
+        "issue": "Dynamic updates are not announced to screen readers",
+        "fix": [
+            "Ensure status messages are programmatically exposed",
+            "Use appropriate accessibility roles"
+        ],
+        "priority": "High",
+        "automation_possible": False
+    },
+
+    "Resize text": {
+        "issue": "Text cannot be resized properly",
+        "fix": [
+            "Ensure content scales up to 200%",
+            "Avoid fixed font sizes"
+        ],
+        "priority": "Medium",
+        "automation_possible": False
+    },
+
+    "Reflow": {
+        "issue": "Content breaks when zoomed",
+        "fix": [
+            "Ensure no horizontal scrolling is required",
+            "Use responsive layout principles"
+        ],
+        "priority": "Medium",
+        "automation_possible": False
+    },
+
+    "Non-text contrast": {
+        "issue": "UI elements lack sufficient contrast",
+        "fix": [
+            "Ensure buttons, borders, and inputs meet contrast requirements",
+            "Use visible outlines"
+        ],
+        "priority": "High",
+        "automation_possible": False
+    },
+
+    "Text spacing": {
+        "issue": "Layout breaks with increased text spacing",
+        "fix": [
+            "Avoid fixed heights",
+            "Ensure layout adapts to spacing changes"
+        ],
+        "priority": "Medium",
+        "automation_possible": False
+    },
+
+    "Language of parts": {
+        "issue": "Mixed language content not identified",
+        "fix": [
+            "Mark language changes within text",
+            "Use appropriate language tags"
+        ],
+        "priority": "Low",
+        "automation_possible": False
+    },
+
+    "Target size": {
+        "issue": "Interactive elements are too small",
+        "fix": [
+            "Ensure clickable elements are at least 24x24 px",
+            "Increase spacing between controls"
+        ],
+        "priority": "Medium",
+        "automation_possible": False
     }
 }
 
@@ -585,6 +947,10 @@ def calculate_effort_category(unique_failed_issues, high_count, medium_count, lo
 def detect_pdf_has_forms(input_json):
     """
     Detect whether the document has form fields based on Adobe's "Forms" section.
+
+    Note: Adobe's "Forms" rules are accessibility checks and may be present even when there
+    are no form fields. When we have access to the original PDF bytes, prefer using
+    `detect_pdf_has_form_fields_from_pdf_bytes()` instead.
     """
     detailed = input_json.get("Detailed Report", {}) or {}
     forms = detailed.get("Forms") or []
@@ -596,51 +962,140 @@ def detect_pdf_has_forms(input_json):
     for item in forms:
         if not isinstance(item, dict):
             continue
-        if item.get("Rule") in known_form_rules:
+
+        if item.get("Rule") not in known_form_rules:
+            continue
+
+        # Keep this as a weak signal only: if Adobe says a form rule failed, we can be sure
+        # form-related content exists. But "Passed" does not mean "no form fields".
+        status = str(item.get("Status", "")).strip().lower()
+        if status != "passed":
             return True
 
     return False
 
 
-def detect_pdf_is_image_only(input_json):
+def detect_pdf_has_images_from_alt(input_json):
     """
-    Detect image-only PDFs based on Adobe's "Image-only PDF" rule in the "Document" section.
+    Detect PDFs with images based on Adobe's "Alternate Text" checks.
+
+    Note: This is a weaker signal than checking the PDF bytes directly.
     """
     detailed = input_json.get("Detailed Report", {}) or {}
-    document_items = detailed.get("Document") or []
-
-    if not isinstance(document_items, list) or not document_items:
+    alt_items = detailed.get("Alternate Text") or []
+    if not isinstance(alt_items, list) or not alt_items:
         return False
 
-    for item in document_items:
+    image_related_rules = {"Figures alternate text", "Other elements alternate text"}
+    for item in alt_items:
         if not isinstance(item, dict):
             continue
-        if item.get("Rule") != "Image-only PDF":
+        if item.get("Rule") not in image_related_rules:
             continue
 
         status = str(item.get("Status", "")).strip().lower()
-        # Adobe reports "Passed" when it is NOT image-only.
-        return status != "passed"
+        if status != "passed":
+            return True
 
     return False
 
 
-def classify_pdf_folder(input_json, processed_output):
+def detect_pdf_has_form_fields_from_pdf_bytes(pdf_bytes: bytes):
+    """
+    Best-effort heuristic to detect presence of interactive form fields in a PDF.
+
+    We look for AcroForm dictionaries and/or widget annotations.
+    """
+    acroform = bool(re.search(rb"/AcroForm\b", pdf_bytes, flags=re.IGNORECASE))
+    widget = bool(re.search(rb"/Subtype\s*/Widget\b", pdf_bytes, flags=re.IGNORECASE))
+
+    has_forms = acroform or widget
+    return has_forms, {
+        "method": "pdf_bytes:/AcroForm or /Subtype /Widget",
+        "has_form_fields": has_forms,
+        "acroform": acroform,
+        "widget": widget,
+    }
+
+
+def detect_pdf_has_raster_images(pdf_bytes: bytes):
+    """
+    Best-effort heuristic to detect embedded raster images from raw PDF bytes.
+
+    We look for XObject images: `/Subtype /Image`.
+    We also include a lightweight inline-image hint for `BI ... ID ... EI` blocks.
+    """
+    image_xobject_count = len(re.findall(rb"/Subtype\s*/Image", pdf_bytes, flags=re.IGNORECASE))
+    inline_image_hint = bool(
+        re.search(
+            rb"\bBI\b.{0,300}\bID\b.{0,300}\bEI\b",
+            pdf_bytes,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+    )
+
+    has_images = (image_xobject_count > 0) or inline_image_hint
+    return has_images, {
+        "method": "pdf_bytes:/Subtype /Image (+inline BI/ID/EI hint)",
+        "has_raster_images": has_images,
+        "image_xobject_count": image_xobject_count,
+        "inline_image_hint": inline_image_hint,
+    }
+
+
+def classify_pdf_folder(input_json, processed_output, pdf_path=None):
     """
     Returns:
       (top_category, effort_subfolder)
 
     Required folder categories (mutually exclusive):
-      1) PDFforms (takes precedence over image-only)
-      2) PDF with images (image-only PDFs)
+      1) PDF with images
+      2) PDFforms
       3) Pdf (everything else)
     """
-    if detect_pdf_has_forms(input_json):
-        top_category = "PDFforms"
-    elif detect_pdf_is_image_only(input_json):
-        top_category = "PDF with images"
+    # Prefer local PDF-bytes image detection when possible.
+    image_detection = input_json.get("image_detection")
+    local_image_detection = None
+
+    if image_detection and isinstance(image_detection, dict):
+        local_image_detection = image_detection
+    elif pdf_path and os.path.isfile(pdf_path):
+        try:
+            with open(pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+            _, local_image_detection = detect_pdf_has_raster_images(pdf_bytes)
+        except Exception:
+            local_image_detection = None
+
+    if local_image_detection:
+        processed_output["image_detection"] = local_image_detection
+        if local_image_detection.get("has_raster_images") is True:
+            top_category = "PDF with images"
+        else:
+            # No embedded raster images: decide between forms vs non-forms.
+            form_detection = None
+            if pdf_path and os.path.isfile(pdf_path):
+                try:
+                    with open(pdf_path, "rb") as f:
+                        pdf_bytes = f.read()
+                    _, form_detection = detect_pdf_has_form_fields_from_pdf_bytes(pdf_bytes)
+                except Exception:
+                    form_detection = None
+
+            if form_detection:
+                processed_output["form_detection"] = form_detection
+                top_category = "PDFforms" if form_detection.get("has_form_fields") else "Pdf"
+            else:
+                # Fallback: Adobe-json-based form hint.
+                top_category = "PDFforms" if detect_pdf_has_forms(input_json) else "Pdf"
     else:
-        top_category = "Pdf"
+        # Fallback when we can't read bytes: use ALT-based detection (less reliable).
+        if detect_pdf_has_images_from_alt(input_json):
+            top_category = "PDF with images"
+        elif detect_pdf_has_forms(input_json):
+            top_category = "PDFforms"
+        else:
+            top_category = "Pdf"
 
     issues = processed_output.get("issues", []) or []
     deduped = dedupe_issues(issues)
@@ -816,7 +1271,22 @@ def process_all_adobe_outputs(input_folder="Adobe_API_Output", output_folder="Fi
             adobe_output = json.load(file)
 
         processed_output = process_accessibility_report(adobe_output, document_name=file_name)
-        top_category, effort_subfolder = classify_pdf_folder(adobe_output, processed_output)
+        # Resolve the original PDF path so we can detect embedded images from bytes.
+        pdf_path = pdf_stem_to_path.get(base_name.lower())
+        if not pdf_path:
+            base_lower = base_name.lower()
+            prefix_matches = [
+                p
+                for stem, p in pdf_stem_to_path.items()
+                if stem.startswith(base_lower) or base_lower.startswith(stem)
+            ]
+            pdf_path = sorted(prefix_matches)[0] if prefix_matches else None
+
+        top_category, effort_subfolder = classify_pdf_folder(
+            adobe_output,
+            processed_output,
+            pdf_path=pdf_path,
+        )
         processed_output["distributed_category"] = top_category
         processed_output["distributed_subcategory"] = effort_subfolder
         processed_output["distributed_folder"] = os.path.join(top_category, effort_subfolder)
@@ -828,17 +1298,7 @@ def process_all_adobe_outputs(input_folder="Adobe_API_Output", output_folder="Fi
 
         # Distribute original PDFs into the requested folders.
         # Assumes the input PDF shares the same basename as the Adobe JSON.
-        pdf_path = pdf_stem_to_path.get(base_name.lower())
-
-        if not pdf_path:
-            # Fallback: prefix match in case the naming differs slightly.
-            base_lower = base_name.lower()
-            prefix_matches = [
-                p
-                for stem, p in pdf_stem_to_path.items()
-                if stem.startswith(base_lower) or base_lower.startswith(stem)
-            ]
-            pdf_path = sorted(prefix_matches)[0] if prefix_matches else None
+        # `pdf_path` is already resolved above.
 
         if pdf_path and os.path.isfile(pdf_path):
             dest_dir = os.path.join(categorized_output_folder, top_category, effort_subfolder)
