@@ -1,0 +1,16 @@
+2026-04-01 08:13:42 INFO Log file: C:\Users\V4 INFO\Code\ADA_Compliance_Testing_GitHub\ADA_Compliance_Testing\data Dictionary\logs\Data_Dictionary_20260401_081342.log
+2026-04-01 08:13:42 INFO Found 1 PDF(s) to process.
+
+2026-04-01 08:13:42 INFO   Saved data dictionary : C:\Users\V4 INFO\Code\ADA_Compliance_Testing_GitHub\ADA_Compliance_Testing\data Dictionary\Generated_Data_Dictionary.xlsx
+2026-04-01 08:13:42 INFO Processing: CCP0503.pdf
+2026-04-01 08:13:42 INFO   Found 20 AcroForm field(s) in the PDF.
+2026-04-01 08:13:42 INFO   -> Azure Document Intelligence ...
+2026-04-01 08:13:46 INFO   [1/30] running ...
+2026-04-01 08:13:50 INFO   -> Azure OpenAI: generating recommendations + descriptions ...
+2026-04-01 08:14:01 INFO   OpenAI enrichment complete.
+2026-04-01 08:14:01 INFO   -> Azure OpenAI: generating metadata ...
+2026-04-01 08:14:05 INFO   Updated data dictionary: C:\Users\V4 INFO\Code\ADA_Compliance_Testing_GitHub\ADA_Compliance_Testing\data Dictionary\Generated_Data_Dictionary.xlsx
+2026-04-01 08:14:05 INFO   Saved metadata        : C:\Users\V4 INFO\Code\ADA_Compliance_Testing_GitHub\ADA_Compliance_Testing\data Dictionary\CCP0503_Metadata.xlsx
+2026-04-01 08:14:05 INFO Done: CCP0503
+
+2026-04-01 08:14:05 INFO All done.

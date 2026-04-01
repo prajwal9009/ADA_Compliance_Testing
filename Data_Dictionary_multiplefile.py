@@ -2,11 +2,9 @@ import os
 import re
 import json
 import time
-import logging
 import requests
-from datetime import datetime
 from pypdf import PdfReader
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
@@ -20,40 +18,12 @@ AZURE_DOC_KEY      = os.environ.get("AZURE_DOC_INTELLIGENCE_KEY", "")
 # Azure OpenAI
 AZURE_OPENAI_ENDPOINT    = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
 AZURE_OPENAI_API_KEY     = os.environ.get("AZURE_OPENAI_API_KEY", "")
-AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-01")
-AZURE_OPENAI_DEPLOYMENT  = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "")
+AZURE_OPENAI_DEPLOYMENT  = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "")
 
 _SCRIPT_DIR       = os.path.dirname(os.path.abspath(__file__))
 INPUT_REPORTS_DIR = os.path.join(_SCRIPT_DIR, "Input_reports")
 OUTPUT_DIR        = os.path.join(_SCRIPT_DIR, "data Dictionary")
-
-log = logging.getLogger("data_dictionary")
-
-
-def configure_run_logging(output_dir: str) -> str:
-    """
-    Write the same messages shown on the console to a timestamped log file
-    under <output_dir>/logs/.
-    """
-    logs_dir = os.path.join(output_dir, "logs")
-    os.makedirs(logs_dir, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = os.path.join(logs_dir, f"Data_Dictionary_{stamp}.log")
-
-    log.handlers.clear()
-    log.setLevel(logging.INFO)
-    log.propagate = False
-    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s",
-                            datefmt="%Y-%m-%d %H:%M:%S")
-    fh = logging.FileHandler(log_path, encoding="utf-8")
-    fh.setFormatter(fmt)
-    sh = logging.StreamHandler()
-    sh.setFormatter(fmt)
-    log.addHandler(fh)
-    log.addHandler(sh)
-
-    log.info("Log file: %s", log_path)
-    return log_path
 
 AZURE_API_VERSION = "2023-07-31"
 POLL_INTERVAL_SEC = 2
@@ -67,21 +37,6 @@ _FIELD_TYPE_MAP = {
 }
 
 _UNDEFINED_VALUES = {"", "undefined", "none", "null", "n/a", "na", "-"}
-_GENERIC_TOOLTIP_VALUES = {
-    "label", "tooltip", "field", "text", "textbox", "input", "value",
-    "name", "title", "description", "required"
-}
-
-
-def _acro_tooltip_from_annot(annot) -> str:
-    """PDF alternate name / mapping name (common tooltip sources in AcroForm)."""
-    for key in ("/TU", "/TM"):
-        raw = annot.get(key)
-        if raw:
-            t = _clean_str(raw)
-            if t and not _is_undefined(t):
-                return t
-    return ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -130,11 +85,10 @@ def extract_acroform_fields(pdf_path: str) -> list:
                 "field_name":  field_name,
                 "field_type":  field_type,
                 "field_value": value,
-                "pdf_tooltip": _acro_tooltip_from_annot(annot),
                 "rect":        rect,
             })
 
-    log.info("  Found %s AcroForm field(s) in the PDF.", len(fields))
+    print(f"  Found {len(fields)} AcroForm field(s) in the PDF.")
     return fields
 
 
@@ -153,55 +107,12 @@ def _is_undefined(value: str) -> bool:
     return str(value or "").strip().lower() in _UNDEFINED_VALUES
 
 
-def _is_meaningful_tooltip(value: str) -> bool:
-    txt = str(value or "").strip()
-    low = txt.lower()
-    if not txt or low in _UNDEFINED_VALUES or low in _GENERIC_TOOLTIP_VALUES:
-        return False
-    # Single-token placeholders like "label1" or "field_2" are usually not useful.
-    if len(txt.split()) == 1 and re.fullmatch(r"[a-zA-Z_]+\d*", txt):
-        return False
-    return True
-
-
 def _normalize_identifier(text: str, fallback: str) -> str:
     parts = re.findall(r"[A-Za-z0-9]+", str(text or ""))
     if not parts:
         return fallback
     normalized = "_".join(parts)
     return normalized[:80]
-
-
-def _fallback_description(field_id: str, field_type: str, pdf_tooltip: str, recommended_label: str = "") -> str:
-    """Guaranteed non-empty description from field id/type/pdf tooltip."""
-    fid = str(field_id or "").strip() or "this field"
-    ftype = str(field_type or "").strip() or "input"
-    tip = str(pdf_tooltip or "").strip()
-    label = str(recommended_label or "").strip()
-    if _is_meaningful_tooltip(tip):
-        return f"This {ftype.lower()} field captures {tip.lower()}."
-    if label:
-        return f"This {ftype.lower()} field captures {label.lower()}."
-    return f"This {ftype.lower()} field captures information for {fid}."
-
-
-def _fallback_recommended_label(field_id: str, pdf_tooltip: str) -> str:
-    if _is_meaningful_tooltip(pdf_tooltip):
-        return str(pdf_tooltip).strip()
-    txt = str(field_id or "").strip()
-    if not txt:
-        return "Form Field"
-    txt = re.sub(r"[_\-]+", " ", txt)
-    txt = re.sub(r"\s+", " ", txt).strip()
-    return txt[:80]
-
-
-def _fallback_recommended_tooltip(field_id: str, field_type: str, pdf_tooltip: str) -> str:
-    if _is_meaningful_tooltip(pdf_tooltip):
-        return f'Enter the value for "{str(pdf_tooltip).strip()}".'
-    fid = str(field_id or "").strip() or "this field"
-    ftype = str(field_type or "").strip() or "field"
-    return f"Enter the required value for {fid} ({ftype})."
 
 
 def _collect_pypdf_label_candidates(pdf_path: str) -> dict:
@@ -220,12 +131,10 @@ def _collect_pypdf_label_candidates(pdf_path: str) -> dict:
 
 
 def _ensure_unique_field_names(acro_fields: list) -> list:
-    """Guarantee unique field_name values while preserving original text."""
+    """Guarantee unique field_name values by appending numeric suffixes."""
     seen = {}
-    for i, field in enumerate(acro_fields, start=1):
-        base = str(field.get("field_name", "") or "").strip()
-        if not base:
-            base = f"Field_{i}"
+    for field in acro_fields:
+        base = _normalize_identifier(field.get("field_name", ""), fallback="Field")
         count = seen.get(base, 0)
         if count == 0:
             unique_name = base
@@ -261,7 +170,7 @@ def resolve_missing_field_identity(acro_fields: list, pdf_path: str) -> list:
         if _is_undefined(candidate):
             candidate = f"Field {i}"
 
-        field["field_name"] = str(candidate).strip() or f"Field_{i}"
+        field["field_name"] = _normalize_identifier(candidate, fallback=f"Field_{i}")
 
     return _ensure_unique_field_names(acro_fields)
 
@@ -276,7 +185,7 @@ def get_page_heights(pdf_path: str) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def analyze_pdf_with_azure(pdf_path: str) -> dict:
-    log.info("  -> Azure Document Intelligence ...")
+    print(f"  -> Azure Document Intelligence ...")
     url = (
         f"{AZURE_DOC_ENDPOINT.rstrip('/')}/formrecognizer/documentModels/"
         f"prebuilt-document:analyze?api-version={AZURE_API_VERSION}"
@@ -300,7 +209,7 @@ def analyze_pdf_with_azure(pdf_path: str) -> dict:
             return data
         if data.get("status") == "failed":
             raise RuntimeError(f"Azure analysis failed: {data}")
-        log.info("  [%s/%s] %s ...", attempt + 1, MAX_POLL_ATTEMPTS, data.get("status"))
+        print(f"  [{attempt + 1}/{MAX_POLL_ATTEMPTS}] {data.get('status')} ...")
         time.sleep(POLL_INTERVAL_SEC)
     raise TimeoutError("Azure analysis timed out.")
 
@@ -372,22 +281,7 @@ def _parse_json_response(raw: str) -> list:
     """Strip markdown fences and parse JSON array from OpenAI response."""
     cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.MULTILINE)
     cleaned = re.sub(r"```\s*$",          "", cleaned.strip(), flags=re.MULTILINE)
-    cleaned = cleaned.strip()
-    try:
-        parsed = json.loads(cleaned)
-        return parsed if isinstance(parsed, list) else []
-    except json.JSONDecodeError:
-        # Recover the first bracketed JSON block when the model emits
-        # extra prose or partially malformed content.
-        match = re.search(r"\[[\s\S]*\]", cleaned)
-        if match:
-            try:
-                parsed = json.loads(match.group(0))
-                return parsed if isinstance(parsed, list) else []
-            except json.JSONDecodeError:
-                pass
-        log.warning("  OpenAI field enrichment JSON was invalid; using fallback values.")
-        return []
+    return json.loads(cleaned.strip())
 
 
 def enrich_fields_with_openai(acro_fields: list, page_texts: dict, headings: list) -> list:
@@ -401,7 +295,7 @@ def enrich_fields_with_openai(acro_fields: list, page_texts: dict, headings: lis
     Page text and heading list are passed as context so the model can reason
     about the document structure.
     """
-    log.info("  -> Azure OpenAI: generating recommendations + descriptions ...")
+    print(f"  -> Azure OpenAI: generating Label / Description / Tooltip / Section ...")
 
     # Build compact field list for the prompt
     field_list = [
@@ -409,7 +303,6 @@ def enrich_fields_with_openai(acro_fields: list, page_texts: dict, headings: lis
             "field_name": f["field_name"],
             "type": f["field_type"],
             "page": f["page"],
-            "existing_pdf_tooltip": f.get("pdf_tooltip", ""),
         }
         for f in acro_fields
     ]
@@ -441,16 +334,13 @@ Form fields to analyse:
 {json.dumps(field_list, indent=2)}
 
 For EVERY field in the list above return a JSON array where each object has exactly these keys:
-  "field_name"               : copy the exact field_name from the input — do not change it
-  "recommended_title"        : short business-friendly title (2-6 words), title case
-  "recommended_field_name"   : suggested standardized field id (snake_case), based on document intent
-  "recommended_label"        : short human-readable label, 2-5 words, title case
-  "recommended_tooltip"      : one instruction sentence telling the user how to fill this field
-  "description"              : one sentence based ONLY on field_name, type, and existing_pdf_tooltip.
-                               Do not leave it blank.
-  "section"                  : choose the most appropriate name from the "Valid section names" list above.
-                               Read the document text to understand which section each field belongs to.
-                               Every field must be assigned one of the listed section names exactly as written.
+  "field_name"  : copy the exact field_name from the input — do not change it
+  "label"       : short human-readable label, 2-5 words, title case, inferred from field intent and document context
+  "description" : one sentence explaining what information this field captures
+  "tooltip"     : one instruction sentence telling the user how to fill this field
+  "section"     : choose the most appropriate name from the "Valid section names" list above.
+                  Read the document text to understand which section each field belongs to.
+                  Every field must be assigned one of the listed section names exactly as written.
 
 Return ONLY the JSON array. No explanation, no markdown fences."""
 
@@ -463,48 +353,20 @@ Return ONLY the JSON array. No explanation, no markdown fences."""
     result = []
     for f in acro_fields:
         oai = openai_map.get(f["field_name"], {})
-        recommended_label = oai.get("recommended_label", "") or oai.get("label", "")
-        if _is_undefined(recommended_label):
-            recommended_label = _fallback_recommended_label(
-                f.get("field_name", ""),
-                f.get("pdf_tooltip", ""),
-            )
-        recommended_tooltip = oai.get("recommended_tooltip", "") or oai.get("tooltip", "")
-        if _is_undefined(recommended_tooltip):
-            recommended_tooltip = _fallback_recommended_tooltip(
-                f.get("field_name", ""),
-                f.get("field_type", ""),
-                f.get("pdf_tooltip", ""),
-            )
-        recommended_title = oai.get("recommended_title", "")
-        if _is_undefined(recommended_title):
-            recommended_title = recommended_label
-        recommended_field_name = oai.get("recommended_field_name", "")
-        if _is_undefined(recommended_field_name):
-            recommended_field_name = _normalize_identifier(f["field_name"], fallback="field_name")
-        description = oai.get("description", "")
-        if _is_undefined(description):
-            description = _fallback_description(
-                f.get("field_name", ""),
-                f.get("field_type", ""),
-                f.get("pdf_tooltip", ""),
-                recommended_label,
-            )
+        chosen_label = oai.get("label", "")
+        if _is_undefined(chosen_label):
+            chosen_label = f["field_name"]
         result.append({
             "page":        f["page"],
             "section":     oai.get("section", "Form Fields"),
             "field_name":  f["field_name"],
-            "label":       f["field_name"],
+            "label":       chosen_label,
             "type":        f["field_type"],
-            "description": description,
-            "existing_pdf_tooltip": f.get("pdf_tooltip", ""),
-            "recommended_title": recommended_title,
-            "recommended_field_name": recommended_field_name,
-            "recommended_label": recommended_label,
-            "recommended_tooltip": recommended_tooltip,
+            "description": oai.get("description", ""),
+            "tooltip":     oai.get("tooltip",     ""),
         })
 
-    log.info("  OpenAI enrichment complete.")
+    print(f"  OpenAI enrichment complete.")
     return result
 
 
@@ -569,7 +431,7 @@ def extract_pdf_metadata(pdf_path: str) -> dict:
                     pass
 
     except Exception as exc:
-        log.warning("  could not read PDF metadata: %s", exc)
+        print(f"  Warning: could not read PDF metadata: {exc}")
     return meta
 
 
@@ -579,7 +441,7 @@ def enrich_metadata_with_openai(meta: dict, page_texts: dict, headings: list) ->
     from the actual document content.
     Author is never inferred — only kept if present in the PDF Info dict.
     """
-    log.info("  -> Azure OpenAI: generating metadata ...")
+    print(f"  -> Azure OpenAI: generating metadata ...")
 
     first_page_text = page_texts.get(1, "")[:3000]
     heading_list    = "\n".join(f"  {h}" for _, h in headings) or "  (none)"
@@ -618,20 +480,7 @@ Return ONLY the JSON object. No explanation, no markdown fences."""
     # Strip fences
     cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.MULTILINE)
     cleaned = re.sub(r"```\s*$",          "", cleaned.strip(), flags=re.MULTILINE)
-    cleaned = cleaned.strip()
-    try:
-        oai = json.loads(cleaned)
-    except json.JSONDecodeError:
-        match = re.search(r"\{[\s\S]*\}", cleaned)
-        if match:
-            try:
-                oai = json.loads(match.group(0))
-            except json.JSONDecodeError:
-                oai = {}
-        else:
-            oai = {}
-        if not oai:
-            log.warning("  OpenAI metadata JSON was invalid; keeping extracted metadata.")
+    oai     = json.loads(cleaned.strip())
 
     if not meta["document_title"]:
         meta["document_title"] = oai.get("document_title", "")
@@ -730,111 +579,80 @@ def _cell(ws, row, col, value="", fill=None, bold=False,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  DATA DICTIONARY EXCEL (single consolidated file)
+#  DATA DICTIONARY EXCEL  —  matches reference column structure exactly
+#  Sr .No. | Field Name | Label | Type | Description | Tooltip
 # ─────────────────────────────────────────────────────────────────────────────
 
-DD_COLUMNS = [
-    "filename",
-    "pageNum",
-    "Title",
-    "Field ID",
-    "Form Field Type",
-    "Field Label",
-    "Data Type",
-    "Required",
-    "Description",
-    "Existing PDF Tooltip",
-    "Recommended Title",
-    "Recommended Field Name",
-    "Recommended Label",
-    "Recommended Tooltip",
-]
-DD_COL_WIDTHS = [24, 10, 28, 32, 20, 26, 16, 12, 54, 45, 30, 32, 28, 45]
+DD_COLUMNS    = ["Sr .No.", "Field Name", "Label", "Type", "Description", "Tooltip"]
+DD_COL_WIDTHS = [8, 38, 28, 14, 45, 50]
 
 
-def write_data_dictionary_excel(records: list, output_path: str):
+def write_data_dictionary_excel(fields: list, output_path: str, form_name: str):
     wb = Workbook()
     ws = wb.active
-    ws.title = "Data Dictionary"
+    ws.title = "form data"
 
-    for i, width in enumerate(DD_COL_WIDTHS, start=1):
-        ws.column_dimensions[get_column_letter(i)].width = width
+    for i, w in enumerate(DD_COL_WIDTHS, start=3):   # starts at column C
+        ws.column_dimensions[get_column_letter(i)].width = w
 
-    ws.row_dimensions[1].height = 18
-    for ci, col_name in enumerate(DD_COLUMNS, start=1):
-        _cell(ws, 1, ci, col_name, fill=_HEADER_FILL, bold=True, align="center")
+    row_num = 1
 
-    for row_idx, rec in enumerate(records, start=2):
-        alt = _ALT_FILL if row_idx % 2 == 0 else None
-        ws.row_dimensions[row_idx].height = 16
+    # Title row
+    ws.row_dimensions[row_num].height = 22
+    tc = ws.cell(row=row_num, column=3,
+                 value=f"  Form fields data dictionary  -  {form_name}")
+    tc.fill      = _TITLE_FILL
+    tc.font      = Font(name="Calibri", bold=True, color="FFFFFF", size=13)
+    tc.alignment = Alignment(horizontal="center", vertical="center")
+    ws.merge_cells(start_row=row_num, start_column=3,
+                   end_row=row_num,   end_column=3 + len(DD_COLUMNS) - 1)
+    row_num += 2
 
-        row_values = [
-            rec.get("filename", ""),
-            rec.get("pageNum", ""),
-            rec.get("Title", ""),
-            rec.get("Field ID", ""),
-            rec.get("Form Field Type", ""),
-            rec.get("Field Label", ""),
-            rec.get("Data Type", ""),
-            rec.get("Required", ""),
-            rec.get("Description", ""),
-            rec.get("Existing PDF Tooltip", ""),
-            rec.get("Recommended Title", ""),
-            rec.get("Recommended Field Name", ""),
-            rec.get("Recommended Label", ""),
-            rec.get("Recommended Tooltip", ""),
-        ]
-        for ci, value in enumerate(row_values, start=1):
-            _cell(ws, row_idx, ci, value, fill=alt, wrap=(ci >= 8))
+    current_section = None
+    sr_counter      = 0
 
-    ws.freeze_panes = "A2"
+    for rec in fields:
+        section = rec["section"]
+
+        if section != current_section:
+            current_section = section
+            sr_counter      = 0
+
+            # Section header
+            ws.row_dimensions[row_num].height = 18
+            sc = ws.cell(row=row_num, column=3, value=f"  Section :  {section}")
+            sc.fill      = _SECTION_FILL
+            sc.font      = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
+            sc.alignment = Alignment(horizontal="left", vertical="center")
+            ws.merge_cells(start_row=row_num, start_column=3,
+                           end_row=row_num,   end_column=3 + len(DD_COLUMNS) - 1)
+            row_num += 1
+
+            # Column header row
+            ws.row_dimensions[row_num].height = 16
+            for ci, col_name in enumerate(DD_COLUMNS, start=3):
+                _cell(ws, row_num, ci, col_name,
+                      fill=_HEADER_FILL, bold=True, align="center")
+            row_num += 1
+
+        sr_counter += 1
+        alt = _ALT_FILL if sr_counter % 2 == 0 else None
+        ws.row_dimensions[row_num].height = 15
+
+        for ci, val in enumerate([
+            sr_counter,
+            rec["field_name"],
+            rec["label"],
+            rec["type"],
+            rec.get("description", ""),
+            rec.get("tooltip",     ""),
+        ], start=3):
+            _cell(ws, row_num, ci, val, fill=alt, wrap=(ci >= 7))
+        row_num += 1
+
+    ws.freeze_panes = "C6"
     wb.save(output_path)
-    log.info("  Saved data dictionary : %s", output_path)
-
-
-def initialize_data_dictionary_excel(output_path: str):
-    """Create the consolidated data dictionary workbook with headers only."""
-    write_data_dictionary_excel([], output_path)
-
-
-def append_data_dictionary_rows(records: list, output_path: str):
-    """Append new rows to the existing consolidated data dictionary workbook."""
-    if not records:
-        return
-    if not os.path.exists(output_path):
-        initialize_data_dictionary_excel(output_path)
-
-    wb = load_workbook(output_path)
-    ws = wb["Data Dictionary"] if "Data Dictionary" in wb.sheetnames else wb.active
-
-    start_row = ws.max_row + 1
-    for idx, rec in enumerate(records):
-        row_idx = start_row + idx
-        alt = _ALT_FILL if row_idx % 2 == 0 else None
-        ws.row_dimensions[row_idx].height = 16
-
-        row_values = [
-            rec.get("filename", ""),
-            rec.get("pageNum", ""),
-            rec.get("Title", ""),
-            rec.get("Field ID", ""),
-            rec.get("Form Field Type", ""),
-            rec.get("Field Label", ""),
-            rec.get("Data Type", ""),
-            rec.get("Required", ""),
-            rec.get("Description", ""),
-            rec.get("Existing PDF Tooltip", ""),
-            rec.get("Recommended Title", ""),
-            rec.get("Recommended Field Name", ""),
-            rec.get("Recommended Label", ""),
-            rec.get("Recommended Tooltip", ""),
-        ]
-        for ci, value in enumerate(row_values, start=1):
-            _cell(ws, row_idx, ci, value, fill=alt, wrap=(ci >= 8))
-
-    ws.freeze_panes = "A2"
-    wb.save(output_path)
-    log.info("  Updated data dictionary: %s", output_path)
+    print(f"  Saved data dictionary : {output_path}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -879,7 +697,7 @@ def write_metadata_excel(meta: dict, output_path: str):
         _cell(ws, sr + 2, 3, meta.get(key, ""),  fill=alt, wrap=True)
 
     wb.save(output_path)
-    log.info("  Saved metadata        : %s", output_path)
+    print(f"  Saved metadata        : {output_path}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -897,8 +715,8 @@ def process_pdf(pdf_path: str) -> tuple:
     # ── Step 1: AcroForm fields ───────────────────────────────────────────────
     acro_fields = extract_acroform_fields(pdf_path)
     if not acro_fields:
-        log.info("  No AcroForm fields found in this PDF.")
-        return [], {}, {}, []
+        print("  No AcroForm fields found in this PDF.")
+        return [], {}
 
     # ── Step 2: Azure Document Intelligence ──────────────────────────────────
     azure_result = {}
@@ -910,7 +728,7 @@ def process_pdf(pdf_path: str) -> tuple:
         page_texts   = extract_page_text(azure_result)
         headings     = extract_headings(azure_result)
     else:
-        log.warning("  Azure Doc Intelligence not configured.")
+        print("  Warning: Azure Doc Intelligence not configured.")
 
     # Fill missing field names before OpenAI enrichment:
     # Doc Intelligence candidates first, then PdfReader fallback.
@@ -921,7 +739,7 @@ def process_pdf(pdf_path: str) -> tuple:
         enriched = enrich_fields_with_openai(acro_fields, page_texts, headings)
     else:
         if not (AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY):
-            log.warning("  Azure OpenAI not configured — using field names only.")
+            print("  Warning: Azure OpenAI not configured — using field names only.")
         enriched = [
             {
                 "page":        f["page"],
@@ -929,29 +747,8 @@ def process_pdf(pdf_path: str) -> tuple:
                 "field_name":  f["field_name"],
                 "label":       f["field_name"],
                 "type":        f["field_type"],
-                "description": _fallback_description(
-                    f.get("field_name", ""),
-                    f.get("field_type", ""),
-                    f.get("pdf_tooltip", ""),
-                    _fallback_recommended_label(
-                        f.get("field_name", ""),
-                        f.get("pdf_tooltip", ""),
-                    ),
-                ),
-                "existing_pdf_tooltip": f.get("pdf_tooltip", ""),
-                "recommended_title": "",
-                "recommended_field_name": _normalize_identifier(
-                    f.get("field_name", ""), fallback="field_name"
-                ),
-                "recommended_label": _fallback_recommended_label(
-                    f.get("field_name", ""),
-                    f.get("pdf_tooltip", ""),
-                ),
-                "recommended_tooltip": _fallback_recommended_tooltip(
-                    f.get("field_name", ""),
-                    f.get("field_type", ""),
-                    f.get("pdf_tooltip", ""),
-                ),
+                "description": "",
+                "tooltip":     "",
             }
             for f in acro_fields
         ]
@@ -965,12 +762,11 @@ def generate_data_dictionary(
     output_dir:        str = OUTPUT_DIR,
 ):
     os.makedirs(output_dir, exist_ok=True)
-    configure_run_logging(output_dir)
 
     if not os.path.isdir(input_reports_dir):
         os.makedirs(input_reports_dir, exist_ok=True)
-        log.info("Created input folder: %s", input_reports_dir)
-        log.info("Place your PDF files there and run again.")
+        print(f"Created input folder: {input_reports_dir}")
+        print(f"Place your PDF files there and run again.")
         return
 
     pdf_files = sorted(
@@ -979,20 +775,20 @@ def generate_data_dictionary(
         if f.lower().endswith(".pdf")
     )
     if not pdf_files:
-        log.info("No PDF files found in: %s", input_reports_dir)
+        print(f"No PDF files found in: {input_reports_dir}")
         return
 
-    log.info("Found %s PDF(s) to process.\n", len(pdf_files))
-    dict_file = os.path.join(output_dir, "Generated_Data_Dictionary.xlsx")
-    initialize_data_dictionary_excel(dict_file)
+    print(f"Found {len(pdf_files)} PDF(s) to process.\n")
 
     for pdf_path in pdf_files:
         pdf_stem  = os.path.splitext(os.path.basename(pdf_path))[0]
+        dict_file = os.path.join(output_dir, f"{pdf_stem}_Data_Dictionary.xlsx")
         meta_file = os.path.join(output_dir, f"{pdf_stem}_Metadata.xlsx")
 
-        log.info("Processing: %s.pdf", pdf_stem)
+        print(f"Processing: {pdf_stem}.pdf")
         try:
             fields, azure_result, page_texts, headings = process_pdf(pdf_path)
+            write_data_dictionary_excel(fields, dict_file, pdf_stem)
 
             # ── Metadata ──────────────────────────────────────────────────────
             meta = extract_pdf_metadata(pdf_path)
@@ -1004,36 +800,16 @@ def generate_data_dictionary(
                 # Fallback: derive from layout analysis only
                 meta = enrich_metadata_from_azure_only(meta, azure_result)
 
-            resolved_title = meta.get("document_title", "")
-            resolved_recommended_title = resolved_title
-            pdf_dictionary_rows = []
-            for f in fields:
-                pdf_dictionary_rows.append({
-                    "filename": pdf_stem,
-                    "pageNum": f.get("page", ""),
-                    "Title": resolved_title,
-                    "Field ID": f.get("field_name", ""),
-                    "Form Field Type": f.get("type", ""),
-                    "Field Label": f.get("label", ""),
-                    "Data Type": "",
-                    "Required": "",
-                    "Description": f.get("description", ""),
-                    "Existing PDF Tooltip": f.get("existing_pdf_tooltip", ""),
-                    "Recommended Title": resolved_recommended_title,
-                    "Recommended Field Name": f.get("recommended_field_name", ""),
-                    "Recommended Label": f.get("recommended_label", ""),
-                    "Recommended Tooltip": f.get("recommended_tooltip", ""),
-                })
-            append_data_dictionary_rows(pdf_dictionary_rows, dict_file)
-
             write_metadata_excel(meta, meta_file)
-            log.info("Done: %s\n", pdf_stem)
+            print(f"Done: {pdf_stem}\n")
 
         except Exception as exc:
-            log.exception("Error processing %s: %s", pdf_path, exc)
-            log.info("")
+            import traceback
+            print(f"Error processing {pdf_path}: {exc}")
+            traceback.print_exc()
+            print()
 
-    log.info("All done.")
+    print("All done.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
