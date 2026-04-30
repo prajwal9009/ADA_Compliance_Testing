@@ -443,13 +443,10 @@ def enrich_metadata_with_openai(meta: dict, page_texts: dict, headings: list) ->
     """
     print(f"  -> Azure OpenAI: generating metadata ...")
 
-    first_page_text = page_texts.get(1, "")[:3000]
-    heading_list    = "\n".join(f"  {h}" for _, h in headings) or "  (none)"
-
     system_prompt = (
         "You are a legal document metadata specialist. "
-        "Given a document's headings and first-page text, return a JSON object "
-        "with accurate metadata. Respond with valid JSON only."
+        "Given document content, return a JSON object with accurate metadata. "
+        "Respond with valid JSON only."
     )
 
     # Numbered list of every heading so the model can reference them by index
@@ -457,39 +454,73 @@ def enrich_metadata_with_openai(meta: dict, page_texts: dict, headings: list) ->
     if not numbered_headings:
         numbered_headings = "  (no headings detected)"
 
-    user_prompt = f"""All headings found in this document (in order):
+    # Use full extracted content (all pages), chunked to keep prompt size manageable.
+    all_pages_text = "\n\n".join(
+        f"[Page {p}]\n{t}" for p, t in sorted(page_texts.items()) if t and t.strip()
+    ).strip()
+    if not all_pages_text:
+        all_pages_text = "(no extracted page text)"
+
+    chunk_size = 12000
+    content_chunks = [
+        all_pages_text[i:i + chunk_size] for i in range(0, len(all_pages_text), chunk_size)
+    ] or [all_pages_text]
+    content_chunks = content_chunks[:3]
+
+    merged = {}
+    for idx, chunk in enumerate(content_chunks, start=1):
+        user_prompt = f"""All headings found in this document (in order):
 {numbered_headings}
 
-First page text:
-{first_page_text}
+Document text chunk {idx}/{len(content_chunks)}:
+{chunk}
 
-Keywords already extracted: {meta.get("keywords", "(none yet)")}
+Currently known metadata from PDF properties:
+  document_title: {meta.get("document_title", "(none yet)")}
+  subject: {meta.get("subject", "(none yet)")}
+  keywords: {meta.get("keywords", "(none yet)")}
+  language: {meta.get("language", "(none yet)")}
 
 Return a JSON object with exactly these keys:
-  "document_title" : the official title — copy the exact text of the first heading on page 1
-  "subject"        : copy the exact text of whichever heading from the list above BEST describes
-                     the document's overall legal purpose. Use the keywords and page content to
-                     decide — pick the heading that most closely matches the core topic.
-                     Do NOT invent or rephrase — return the heading verbatim.
-  "keywords"       : comma-separated list of 8-12 significant legal terms from this document
-  "language"       : ISO 639-1 language code (e.g. "en", "es", "fr") detected from the text
+  "document_title" : meaningful intent-based title (6-12 words) that clearly states what this document is for.
+                     Use content understanding, not just copied heading text. No generic titles.
+  "subject"        : concise subject phrase representing the document's overall purpose
+  "keywords"       : comma-separated list of 8-12 significant legal/domain terms from this document
+  "language"       : ISO 639-1 language code (e.g. "en", "es", "fr")
 
 Return ONLY the JSON object. No explanation, no markdown fences."""
 
-    raw  = _call_openai(system_prompt, user_prompt)
-    # Strip fences
-    cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.MULTILINE)
-    cleaned = re.sub(r"```\s*$",          "", cleaned.strip(), flags=re.MULTILINE)
-    oai     = json.loads(cleaned.strip())
+        raw = _call_openai(system_prompt, user_prompt)
+        cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.MULTILINE)
+        cleaned = re.sub(r"```\s*$", "", cleaned.strip(), flags=re.MULTILINE)
+        cleaned = cleaned.strip()
+        try:
+            oai = json.loads(cleaned)
+        except json.JSONDecodeError:
+            match = re.search(r"\{[\s\S]*\}", cleaned)
+            if match:
+                try:
+                    oai = json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    oai = {}
+            else:
+                oai = {}
 
-    if not meta["document_title"]:
-        meta["document_title"] = oai.get("document_title", "")
+        if isinstance(oai, dict):
+            for key in ("document_title", "subject", "keywords", "language"):
+                val = str(oai.get(key, "")).strip()
+                if val and key not in merged:
+                    merged[key] = val
+
+    # Prefer intent-based OpenAI title when available; keep extracted title only as fallback.
+    if merged.get("document_title", ""):
+        meta["document_title"] = merged.get("document_title", "")
     if not meta["subject"]:
-        meta["subject"]  = oai.get("subject",  "")
+        meta["subject"] = merged.get("subject", "")
     if not meta["keywords"]:
-        meta["keywords"] = oai.get("keywords", "")
+        meta["keywords"] = merged.get("keywords", "")
     if not meta["language"]:
-        meta["language"] = oai.get("language", "")
+        meta["language"] = merged.get("language", "")
 
     return meta
 
@@ -792,6 +823,12 @@ def generate_data_dictionary(
 
             # ── Metadata ──────────────────────────────────────────────────────
             meta = extract_pdf_metadata(pdf_path)
+            # For PDFs without AcroForm fields, process_pdf() exits before Azure extraction.
+            # Run metadata-only extraction so OpenAI can still infer meaningful metadata.
+            if (not page_texts) and AZURE_DOC_ENDPOINT and AZURE_DOC_KEY:
+                azure_result = analyze_pdf_with_azure(pdf_path)
+                page_texts = extract_page_text(azure_result)
+                headings = extract_headings(azure_result)
 
             if AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY and page_texts:
                 # OpenAI gives accurate Subject, Keywords, Language

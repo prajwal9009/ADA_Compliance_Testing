@@ -271,6 +271,78 @@ def get_page_heights(pdf_path: str) -> dict:
     return {i + 1: float(page.mediabox.height) for i, page in enumerate(reader.pages)}
 
 
+# Revision stamps vary by form, e.g.:
+#   CCP-0301A (12/01/24)     — hyphen + optional letter before date
+#   CCP 0006 (12/01/24)      — space instead of hyphen
+#   (12/01/24) CCP 0006      — date first (some single-page forms)
+_REVISION_STD = re.compile(
+    r"CCP[\s-](?P<n>\d{4})(?P<s>[A-Z]?)\s*\(\s*(?P<d>\d{1,2}/\d{1,2}/\d{2,4})\s*\)",
+    re.IGNORECASE,
+)
+_REVISION_DATE_FIRST = re.compile(
+    r"\(\s*(?P<d>\d{1,2}/\d{1,2}/\d{2,4})\s*\)\s*CCP[\s-]?(?P<n>\d{4})(?P<s>[A-Z]?)",
+    re.IGNORECASE,
+)
+
+
+def _format_ccp_revision(n: str, s: str, d: str) -> str:
+    s = (s or "").strip().upper()
+    return f"CCP-{n}{s} ({d})"
+
+
+def _revision_candidates(text: str) -> list[tuple[str, int]]:
+    """Return (normalized stamp, start index) for each match."""
+    out = []
+    for rx in (_REVISION_STD, _REVISION_DATE_FIRST):
+        for m in rx.finditer(text):
+            n = m.group("n")
+            s = m.group("s") or ""
+            d = m.group("d")
+            out.append((_format_ccp_revision(n, s, d), m.start()))
+    # Same span might not duplicate; dedupe by start index keeping first
+    seen = set()
+    deduped = []
+    for item in sorted(out, key=lambda x: x[1]):
+        if item[1] in seen:
+            continue
+        seen.add(item[1])
+        deduped.append(item)
+    return deduped
+
+
+def extract_revision_number_and_date(
+    pdf_path: str,
+    page_num: int,
+    page_texts: dict | None = None,
+) -> str:
+    """
+    Extract revision id and date from the top area of a page (e.g. corner stamp).
+    Uses Azure page text when available, otherwise pypdf text for that page.
+    """
+    text = ""
+    if page_texts and page_texts.get(page_num):
+        text = page_texts[page_num]
+    else:
+        try:
+            reader = PdfReader(pdf_path)
+            if 1 <= page_num <= len(reader.pages):
+                text = reader.pages[page_num - 1].extract_text() or ""
+        except Exception:
+            text = ""
+    if not text:
+        return ""
+    candidates = _revision_candidates(text)
+    if not candidates:
+        return ""
+    if len(candidates) == 1:
+        return candidates[0][0]
+    header_len = max(400, len(text) // 3)
+    for norm, pos in candidates:
+        if pos < header_len:
+            return norm
+    return candidates[0][0]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  STEP 2 — Azure Document Intelligence: page layout + full text
 # ─────────────────────────────────────────────────────────────────────────────
@@ -581,13 +653,10 @@ def enrich_metadata_with_openai(meta: dict, page_texts: dict, headings: list) ->
     """
     log.info("  -> Azure OpenAI: generating metadata ...")
 
-    first_page_text = page_texts.get(1, "")[:3000]
-    heading_list    = "\n".join(f"  {h}" for _, h in headings) or "  (none)"
-
     system_prompt = (
         "You are a legal document metadata specialist. "
-        "Given a document's headings and first-page text, return a JSON object "
-        "with accurate metadata. Respond with valid JSON only."
+        "Given document content, return a JSON object with accurate metadata. "
+        "Respond with valid JSON only."
     )
 
     # Numbered list of every heading so the model can reference them by index
@@ -595,52 +664,75 @@ def enrich_metadata_with_openai(meta: dict, page_texts: dict, headings: list) ->
     if not numbered_headings:
         numbered_headings = "  (no headings detected)"
 
-    user_prompt = f"""All headings found in this document (in order):
+    # Use full extracted content (all pages), chunked to keep prompt size manageable.
+    all_pages_text = "\n\n".join(
+        f"[Page {p}]\n{t}" for p, t in sorted(page_texts.items()) if t and t.strip()
+    ).strip()
+    if not all_pages_text:
+        all_pages_text = "(no extracted page text)"
+
+    chunk_size = 12000
+    content_chunks = [
+        all_pages_text[i:i + chunk_size] for i in range(0, len(all_pages_text), chunk_size)
+    ] or [all_pages_text]
+    content_chunks = content_chunks[:3]
+
+    merged = {}
+    for idx, chunk in enumerate(content_chunks, start=1):
+        user_prompt = f"""All headings found in this document (in order):
 {numbered_headings}
 
-First page text:
-{first_page_text}
+Document text chunk {idx}/{len(content_chunks)}:
+{chunk}
 
-Keywords already extracted: {meta.get("keywords", "(none yet)")}
+Currently known metadata from PDF properties:
+  document_title: {meta.get("document_title", "(none yet)")}
+  subject: {meta.get("subject", "(none yet)")}
+  keywords: {meta.get("keywords", "(none yet)")}
+  language: {meta.get("language", "(none yet)")}
 
 Return a JSON object with exactly these keys:
-  "document_title" : the official title — copy the exact text of the first heading on page 1
-  "subject"        : copy the exact text of whichever heading from the list above BEST describes
-                     the document's overall legal purpose. Use the keywords and page content to
-                     decide — pick the heading that most closely matches the core topic.
-                     Do NOT invent or rephrase — return the heading verbatim.
-  "keywords"       : comma-separated list of 8-12 significant legal terms from this document
-  "language"       : ISO 639-1 language code (e.g. "en", "es", "fr") detected from the text
+  "document_title" : meaningful intent-based title (6-12 words) that clearly states what this document is for.
+                     Use content understanding, not just copied heading text. No generic titles.
+  "subject"        : concise subject phrase representing the document's overall purpose
+  "keywords"       : comma-separated list of 8-12 significant legal/domain terms from this document
+  "language"       : ISO 639-1 language code (e.g. "en", "es", "fr")
 
 Return ONLY the JSON object. No explanation, no markdown fences."""
 
-    raw  = _call_openai(system_prompt, user_prompt)
-    # Strip fences
-    cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.MULTILINE)
-    cleaned = re.sub(r"```\s*$",          "", cleaned.strip(), flags=re.MULTILINE)
-    cleaned = cleaned.strip()
-    try:
-        oai = json.loads(cleaned)
-    except json.JSONDecodeError:
-        match = re.search(r"\{[\s\S]*\}", cleaned)
-        if match:
-            try:
-                oai = json.loads(match.group(0))
-            except json.JSONDecodeError:
+        raw = _call_openai(system_prompt, user_prompt)
+        cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.MULTILINE)
+        cleaned = re.sub(r"```\s*$", "", cleaned.strip(), flags=re.MULTILINE)
+        cleaned = cleaned.strip()
+        try:
+            oai = json.loads(cleaned)
+        except json.JSONDecodeError:
+            match = re.search(r"\{[\s\S]*\}", cleaned)
+            if match:
+                try:
+                    oai = json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    oai = {}
+            else:
                 oai = {}
-        else:
-            oai = {}
-        if not oai:
-            log.warning("  OpenAI metadata JSON was invalid; keeping extracted metadata.")
+            if not oai:
+                log.warning("  OpenAI metadata JSON was invalid for chunk %s.", idx)
 
-    if not meta["document_title"]:
-        meta["document_title"] = oai.get("document_title", "")
+        if isinstance(oai, dict):
+            for key in ("document_title", "subject", "keywords", "language"):
+                val = str(oai.get(key, "")).strip()
+                if val and key not in merged:
+                    merged[key] = val
+
+    # Prefer intent-based OpenAI title when available; keep extracted title only as fallback.
+    if merged.get("document_title", ""):
+        meta["document_title"] = merged.get("document_title", "")
     if not meta["subject"]:
-        meta["subject"]  = oai.get("subject",  "")
+        meta["subject"] = merged.get("subject", "")
     if not meta["keywords"]:
-        meta["keywords"] = oai.get("keywords", "")
+        meta["keywords"] = merged.get("keywords", "")
     if not meta["language"]:
-        meta["language"] = oai.get("language", "")
+        meta["language"] = merged.get("language", "")
 
     return meta
 
@@ -736,6 +828,7 @@ def _cell(ws, row, col, value="", fill=None, bold=False,
 DD_COLUMNS = [
     "filename",
     "pageNum",
+    "revision number & date",
     "Title",
     "Field ID",
     "Form Field Type",
@@ -749,7 +842,7 @@ DD_COLUMNS = [
     "Recommended Label",
     "Recommended Tooltip",
 ]
-DD_COL_WIDTHS = [24, 10, 28, 32, 20, 26, 16, 12, 54, 45, 30, 32, 28, 45]
+DD_COL_WIDTHS = [24, 10, 28, 28, 32, 20, 26, 16, 12, 54, 45, 30, 32, 28, 45]
 
 
 def write_data_dictionary_excel(records: list, output_path: str):
@@ -771,6 +864,7 @@ def write_data_dictionary_excel(records: list, output_path: str):
         row_values = [
             rec.get("filename", ""),
             rec.get("pageNum", ""),
+            rec.get("revision number & date", ""),
             rec.get("Title", ""),
             rec.get("Field ID", ""),
             rec.get("Form Field Type", ""),
@@ -785,7 +879,7 @@ def write_data_dictionary_excel(records: list, output_path: str):
             rec.get("Recommended Tooltip", ""),
         ]
         for ci, value in enumerate(row_values, start=1):
-            _cell(ws, row_idx, ci, value, fill=alt, wrap=(ci >= 8))
+            _cell(ws, row_idx, ci, value, fill=alt, wrap=(ci >= 10))
 
     ws.freeze_panes = "A2"
     wb.save(output_path)
@@ -816,6 +910,7 @@ def append_data_dictionary_rows(records: list, output_path: str):
         row_values = [
             rec.get("filename", ""),
             rec.get("pageNum", ""),
+            rec.get("revision number & date", ""),
             rec.get("Title", ""),
             rec.get("Field ID", ""),
             rec.get("Form Field Type", ""),
@@ -830,7 +925,7 @@ def append_data_dictionary_rows(records: list, output_path: str):
             rec.get("Recommended Tooltip", ""),
         ]
         for ci, value in enumerate(row_values, start=1):
-            _cell(ws, row_idx, ci, value, fill=alt, wrap=(ci >= 8))
+            _cell(ws, row_idx, ci, value, fill=alt, wrap=(ci >= 10))
 
     ws.freeze_panes = "A2"
     wb.save(output_path)
@@ -996,6 +1091,12 @@ def generate_data_dictionary(
 
             # ── Metadata ──────────────────────────────────────────────────────
             meta = extract_pdf_metadata(pdf_path)
+            # For PDFs without AcroForm fields, process_pdf() exits before Azure extraction.
+            # Run metadata-only extraction so OpenAI can still infer meaningful metadata.
+            if (not page_texts) and AZURE_DOC_ENDPOINT and AZURE_DOC_KEY:
+                azure_result = analyze_pdf_with_azure(pdf_path)
+                page_texts = extract_page_text(azure_result)
+                headings = extract_headings(azure_result)
 
             if AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY and page_texts:
                 # OpenAI gives accurate Subject, Keywords, Language
@@ -1006,11 +1107,22 @@ def generate_data_dictionary(
 
             resolved_title = meta.get("document_title", "")
             resolved_recommended_title = resolved_title
+            revision_by_page = {}
             pdf_dictionary_rows = []
             for f in fields:
+                pnum = f.get("page", 1)
+                try:
+                    pnum = int(pnum)
+                except (TypeError, ValueError):
+                    pnum = 1
+                if pnum not in revision_by_page:
+                    revision_by_page[pnum] = extract_revision_number_and_date(
+                        pdf_path, pnum, page_texts
+                    )
                 pdf_dictionary_rows.append({
                     "filename": pdf_stem,
                     "pageNum": f.get("page", ""),
+                    "revision number & date": revision_by_page.get(pnum, ""),
                     "Title": resolved_title,
                     "Field ID": f.get("field_name", ""),
                     "Form Field Type": f.get("type", ""),
